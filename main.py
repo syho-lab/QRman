@@ -6,25 +6,40 @@ from aiogram.types import WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import qrcode
 from io import BytesIO
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 import uvicorn
 from contextlib import asynccontextmanager
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.gzip import GZipMiddleware
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Конфигурация - проверяем переменные окружения
+# Конфигурация
+def get_base_url():
+    base_url = os.getenv("BASE_URL")
+    if base_url:
+        return base_url.rstrip('/')
+    
+    render_url = os.getenv("RENDER_EXTERNAL_URL")
+    if render_url:
+        return render_url.rstrip('/')
+    
+    # Для Render автоматически определяем URL
+    render_service = os.getenv("RENDER_SERVICE_NAME")
+    if render_service:
+        return f"https://{render_service}.onrender.com"
+    
+    return "https://your-app.onrender.com"  # fallback
+
+BASE_URL = get_base_url()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-BASE_URL = os.getenv("BASE_URL")
 
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN environment variable is not set!")
     raise ValueError("BOT_TOKEN is required")
-
-if not BASE_URL:
-    logger.warning("BASE_URL environment variable is not set, using placeholder")
-    BASE_URL = "https://your-app.onrender.com"
 
 logger.info(f"Bot configured with BASE_URL: {BASE_URL}")
 
@@ -32,6 +47,9 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 app = FastAPI(title="QR Master Bot")
+
+# Добавляем сжатие GZIP
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Подключаем роутер
 dp.include_router(router)
@@ -84,11 +102,7 @@ def get_main_keyboard():
         text="🚀 Быстрая генерация",
         callback_data="quick_generate"
     )
-    builder.button(
-        text="ℹ️ Помощь",
-        callback_data="help"
-    )
-    builder.adjust(2, 2)
+    builder.adjust(2, 1)
     return builder.as_markup()
 
 # Генерация QR-кода
@@ -162,40 +176,6 @@ async def generate_qr_from_text(message: types.Message):
         logger.error(f"Error generating QR: {e}")
         await message.answer(BotStyles.ERROR_TEXT, parse_mode="HTML")
 
-# Помощь
-@router.callback_query(F.data == "help")
-async def help_handler(callback: types.CallbackQuery):
-    help_text = """
-🆘 <b>Помощь по использованию бота</b>
-
-<b>📷 Сканирование QR-кодов:</b>
-1. Нажмите "📷 Сканировать QR-код"
-2. Разрешите доступ к камере
-3. Наведите камеру на QR-код
-4. Получите результат!
-
-<b>🔄 Генерация QR-кодов:</b>
-1. Нажмите "🔄 Генератор QR-кодов" 
-2. Введите текст или ссылку
-3. Настройте внешний вид (опционально)
-4. Скачайте готовый QR-код!
-
-<b>🚀 Быстрая генерация:</b>
-• Просто отправьте боту любой текст или ссылку
-• Бот автоматически создаст QR-код
-
-<b>📱 Поддерживаемые форматы:</b>
-• Ссылки (https://...)
-• Текст любой длины
-• Контакты
-• Wi-Fi данные
-• И многое другое!
-
-💡 <i>Для связи с поддержкой используйте /start</i>
-    """
-    await callback.message.answer(help_text, parse_mode="HTML")
-    await callback.answer()
-
 # Обработка данных из WebApp
 @router.message(F.web_app_data)
 async def handle_web_app_data(message: types.Message):
@@ -211,14 +191,17 @@ async def handle_web_app_data(message: types.Message):
         logger.error(f"WebApp error: {e}")
         await message.answer(BotStyles.ERROR_TEXT, parse_mode="HTML")
 
-# WebApp страницы
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-import os
-
 # Создаем директорию для статических файлов
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Middleware для кэширования
+@app.middleware("http")
+async def add_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.endswith(('.html', '.css', '.js')):
+        response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
 
 @app.get("/")
 async def root():
@@ -231,6 +214,15 @@ async def scanner_page():
 @app.get("/generator")
 async def generator_page():
     return FileResponse("static/generator.html")
+
+# Эндпоинт для проверки здоровья (для cron-job.org)
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy", 
+        "service": "QR Telegram Bot",
+        "webhook_set": bool(BOT_TOKEN and BASE_URL)
+    }
 
 # Lifespan для управления вебхуком
 @asynccontextmanager
@@ -252,7 +244,6 @@ async def lifespan(app: FastAPI):
             
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
-        # Не прерываем запуск приложения, бот может работать в polling режиме
     
     yield
     
@@ -275,15 +266,6 @@ async def webhook(request: Request):
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return {"status": "error", "message": str(e)}
-
-# Эндпоинт для проверки здоровья (для cron-job.org)
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy", 
-        "service": "QR Telegram Bot",
-        "webhook_set": bool(BOT_TOKEN and BASE_URL)
-    }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
