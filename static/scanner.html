@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Сканер | QR Master Bot</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: white;
+        }
+        
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        .header {
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .scanner-section {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #FF6B6B, #EE5A24);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255,107,107,0.4);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(45deg, #4ECDC4, #44A08D);
+        }
+        
+        video {
+            width: 100%;
+            border-radius: 15px;
+            margin: 15px 0;
+            display: none;
+        }
+        
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .loading {
+            display: none;
+            margin: 20px 0;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📷 QR Сканер</h1>
+            <p>Наведите камеру на QR-код для автоматического сканирования</p>
+        </div>
+        
+        <div class="scanner-section">
+            <button class="btn" onclick="startScan()">
+                🚀 Запустить сканер
+            </button>
+            
+            <button class="btn btn-secondary" onclick="closeScanner()">
+                ↩️ Назад в бот
+            </button>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Инициализация камеры...</p>
+            </div>
+            
+            <video id="video" playsinline></video>
+            <canvas id="canvas" style="display: none;"></canvas>
+            
+            <div id="result"></div>
+        </div>
+        
+        <div class="tips">
+            <p>💡 <strong>Советы:</strong></p>
+            <p>• Убедитесь, что QR-код хорошо освещен</p>
+            <p>• Держите камеру steady</p>
+            <p>• Поднесите ближе, если не сканируется</p>
+        </div>
+    </div>
+
+    <script>
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let context = canvas.getContext('2d');
+        let scanning = false;
+        
+        // Инициализация Telegram WebApp
+        Telegram.WebApp.ready();
+        Telegram.WebApp.expand();
+        
+        function startScan() {
+            document.getElementById('loading').style.display = 'block';
+            
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            }).then(function(stream) {
+                document.getElementById('loading').style.display = 'none';
+                video.style.display = 'block';
+                video.srcObject = stream;
+                video.play();
+                scanning = true;
+                scanQRCode();
+            }).catch(function(err) {
+                document.getElementById('loading').style.display = 'none';
+                alert('❌ Ошибка доступа к камере: ' + err.message);
+            });
+        }
+        
+        function scanQRCode() {
+            if (!scanning) return;
+            
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
+                
+                if (code) {
+                    scanning = false;
+                    video.style.display = 'none';
+                    
+                    // Отправляем данные в бот
+                    Telegram.WebApp.sendData(code.data);
+                    
+                    // Показываем результат
+                    document.getElementById('result').innerHTML = 
+                        '<h3>✅ QR-код распознан!</h3>' +
+                        '<p>Данные отправлены в бот</p>' +
+                        '<button class="btn" onclick="startScan()">🔄 Сканить еще</button>';
+                    document.getElementById('result').style.display = 'block';
+                    
+                    // Останавливаем поток
+                    let stream = video.srcObject;
+                    let tracks = stream.getTracks();
+                    tracks.forEach(track => track.stop());
+                    
+                    return;
+                }
+            }
+            
+            if (scanning) {
+                requestAnimationFrame(scanQRCode);
+            }
+        }
+        
+        function closeScanner() {
+            if (video.srcObject) {
+                let stream = video.srcObject;
+                let tracks = stream.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+            Telegram.WebApp.close();
+        }
+        
+        // Автоматический запуск при открытии
+        window.onload = function() {
+            setTimeout(startScan, 1000);
+        };
+    </script>
+</body>
+</html>
