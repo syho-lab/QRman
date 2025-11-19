@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Генератор QR | QR Master Bot</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -22,92 +22,62 @@
         }
         
         .container {
-            max-width: 400px;
+            max-width: 100%;
             margin: 0 auto;
         }
         
         .header {
             text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .header h1 {
-            font-size: 24px;
-            margin-bottom: 10px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }
-        
-        .form-section {
-            background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 25px;
-            margin-bottom: 20px;
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        
-        .form-group {
             margin-bottom: 20px;
         }
         
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-        }
-        
-        textarea, input, select {
-            width: 100%;
-            padding: 12px 15px;
-            border: none;
-            border-radius: 10px;
-            background: rgba(255,255,255,0.9);
-            font-size: 14px;
-            resize: vertical;
+        .input-group {
+            margin-bottom: 15px;
         }
         
         textarea {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.9);
+            font-size: 16px;
+            resize: vertical;
             min-height: 100px;
         }
         
         .btn {
-            background: linear-gradient(45deg, #FF6B6B, #EE5A24);
+            background: linear-gradient(135deg, #FF6B6B, #EE5A24);
             color: white;
             border: none;
-            padding: 15px 30px;
-            border-radius: 50px;
+            padding: 16px 24px;
+            border-radius: 12px;
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
             width: 100%;
-            margin: 10px 0;
+            margin: 8px 0;
+            transition: transform 0.2s;
         }
         
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(255,107,107,0.4);
+        .btn:active {
+            transform: scale(0.98);
         }
         
         .btn-secondary {
-            background: linear-gradient(45deg, #4ECDC4, #44A08D);
-        }
-        
-        .qr-preview {
-            text-align: center;
-            margin: 20px 0;
+            background: linear-gradient(135deg, #4ECDC4, #44A08D);
         }
         
         #qrcode {
-            display: inline-block;
-            padding: 20px;
-            background: white;
-            border-radius: 15px;
-            margin: 15px 0;
+            text-align: center;
+            margin: 20px 0;
+            display: none;
         }
         
-        .hidden {
-            display: none;
+        #qrcode canvas {
+            border-radius: 12px;
+            background: white;
+            padding: 10px;
         }
     </style>
 </head>
@@ -115,104 +85,65 @@
     <div class="container">
         <div class="header">
             <h1>🔄 Генератор QR-кодов</h1>
-            <p>Создайте QR-код из любой ссылки или текста</p>
+            <p>Создайте QR-код из текста или ссылки</p>
         </div>
         
-        <div class="form-section">
-            <div class="form-group">
-                <label for="qrData">📝 Введите текст или ссылку:</label>
-                <textarea 
-                    id="qrData" 
-                    placeholder="https://example.com или любой текст..."
-                ></textarea>
-            </div>
-            
-            <button class="btn" onclick="generateQR()">
-                🚀 Сгенерировать QR-код
-            </button>
-            
-            <button class="btn btn-secondary" onclick="closeGenerator()">
-                ↩️ Назад в бот
-            </button>
+        <div class="input-group">
+            <textarea id="textInput" placeholder="Введите текст или ссылку..."></textarea>
         </div>
         
-        <div id="resultSection" class="form-section hidden">
-            <h3 style="text-align: center; margin-bottom: 20px;">✅ Ваш QR-код готов!</h3>
-            
-            <div class="qr-preview">
-                <div id="qrcode"></div>
-            </div>
-            
-            <button class="btn" onclick="downloadQR()">
-                💾 Скачать QR-код
-            </button>
-            
-            <button class="btn btn-secondary" onclick="generateNew()">
-                🆕 Создать еще
-            </button>
-        </div>
+        <button class="btn" onclick="generateQR()">
+            🚀 Сгенерировать QR-код
+        </button>
+        
+        <button class="btn btn-secondary" onclick="closeApp()">
+            ↩️ Назад
+        </button>
+        
+        <div id="qrcode"></div>
     </div>
 
     <script>
-        // Инициализация Telegram WebApp
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
         
         function generateQR() {
-            const data = document.getElementById('qrData').value.trim();
+            const text = document.getElementById('textInput').value.trim();
             
-            if (!data) {
-                alert('❌ Пожалуйста, введите текст или ссылку');
+            if (!text) {
+                alert('Введите текст или ссылку');
                 return;
             }
             
-            // Очищаем предыдущий QR-код
-            document.getElementById('qrcode').innerHTML = '';
+            const qrcodeDiv = document.getElementById('qrcode');
+            qrcodeDiv.innerHTML = '';
             
-            // Генерируем новый QR-код
-            QRCode.toCanvas(document.getElementById('qrcode'), data, {
-                width: 256,
-                height: 256,
-                margin: 2,
-                color: {
-                    dark: '#000000',
-                    light: '#FFFFFF'
-                }
-            }, function(error) {
-                if (error) {
-                    console.error(error);
-                    alert('❌ Ошибка при генерации QR-кода');
-                    return;
-                }
-                
-                // Показываем результат
-                document.getElementById('resultSection').classList.remove('hidden');
-            });
-        }
-        
-        function downloadQR() {
-            const canvas = document.querySelector('#qrcode canvas');
-            if (canvas) {
-                const link = document.createElement('a');
-                link.download = 'qrcode.png';
-                link.href = canvas.toDataURL('image/png');
-                link.click();
+            try {
+                QRCode.toCanvas(qrcodeDiv, text, {
+                    width: 256,
+                    margin: 2,
+                    color: {
+                        dark: '#000000',
+                        light: '#FFFFFF'
+                    }
+                }, function(error) {
+                    if (error) {
+                        alert('Ошибка генерации QR-кода');
+                        return;
+                    }
+                    qrcodeDiv.style.display = 'block';
+                });
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
             }
         }
         
-        function generateNew() {
-            document.getElementById('qrData').value = '';
-            document.getElementById('resultSection').classList.add('hidden');
-        }
-        
-        function closeGenerator() {
+        function closeApp() {
             Telegram.WebApp.close();
         }
         
         // Автофокус на поле ввода
-        window.onload = function() {
-            document.getElementById('qrData').focus();
-        };
+        document.getElementById('textInput').focus();
     </script>
 </body>
 </html>
