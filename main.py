@@ -2,12 +2,11 @@ import os
 import logging
 from aiogram import Bot, Dispatcher, types, Router, F
 from aiogram.filters import Command
-from aiogram.types import WebAppInfo, URLInputFile
+from aiogram.types import WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import qrcode
 from io import BytesIO
-import base64
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 import uvicorn
 from contextlib import asynccontextmanager
 
@@ -15,14 +14,27 @@ from contextlib import asynccontextmanager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Конфигурация
+# Конфигурация - проверяем переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BASE_URL = os.getenv("BASE_URL")
+
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN environment variable is not set!")
+    raise ValueError("BOT_TOKEN is required")
+
+if not BASE_URL:
+    logger.warning("BASE_URL environment variable is not set, using placeholder")
+    BASE_URL = "https://your-app.onrender.com"
+
+logger.info(f"Bot configured with BASE_URL: {BASE_URL}")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
-app = FastAPI(title="QR Code Bot")
+app = FastAPI(title="QR Master Bot")
+
+# Подключаем роутер
+dp.include_router(router)
 
 # Красивые эмодзи и стили
 class BotStyles:
@@ -210,7 +222,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def root():
-    return {"status": "QR Bot is running!"}
+    return {"status": "QR Bot is running!", "webhook_url": f"{BASE_URL}/webhook"}
 
 @app.get("/scanner")
 async def scanner_page():
@@ -223,11 +235,32 @@ async def generator_page():
 # Lifespan для управления вебхуком
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    webhook_url = f"{BASE_URL}/webhook"
-    await bot.set_webhook(webhook_url)
-    logger.info(f"Webhook set to: {webhook_url}")
+    try:
+        # Устанавливаем вебхук только если все переменные настроены
+        if BOT_TOKEN and BASE_URL:
+            webhook_url = f"{BASE_URL}/webhook"
+            logger.info(f"Setting webhook to: {webhook_url}")
+            
+            # Сначала удаляем старый вебхук
+            await bot.delete_webhook(drop_pending_updates=True)
+            
+            # Устанавливаем новый вебхук
+            await bot.set_webhook(webhook_url)
+            logger.info("Webhook set successfully!")
+        else:
+            logger.error("Cannot set webhook: BOT_TOKEN or BASE_URL not configured")
+            
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
+        # Не прерываем запуск приложения, бот может работать в polling режиме
+    
     yield
-    await bot.session.close()
+    
+    # При завершении работы
+    try:
+        await bot.session.close()
+    except Exception as e:
+        logger.error(f"Error closing session: {e}")
 
 app.router.lifespan_context = lifespan
 
@@ -241,7 +274,17 @@ async def webhook(request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Webhook error: {e}")
-        return {"status": "error"}
+        return {"status": "error", "message": str(e)}
+
+# Эндпоинт для проверки здоровья (для cron-job.org)
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy", 
+        "service": "QR Telegram Bot",
+        "webhook_set": bool(BOT_TOKEN and BASE_URL)
+    }
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
